@@ -697,6 +697,37 @@ function modal(html, mount) {
   return m;
 }
 
+function confirmModal({ title = 'Подтверждение', msg, okText = 'Да, продолжить', okStyle = '', onOk }) {
+  const m = modal(`
+    <div style="max-width:440px;padding:4px">
+      <h3 style="margin:0 0 10px;display:flex;align-items:center;gap:8px;font-size:16px">
+        <span>⚠️</span>
+        <span>${e(title)}</span>
+      </h3>
+      <p style="font-size:14px;line-height:1.55;color:#334155;margin:0 0 18px">
+        ${e(msg)}
+      </p>
+      <div class="row" style="gap:10px;justify-content:flex-end">
+        <button class="btn alt" id="modal_cancel_btn">Отмена</button>
+        <button class="btn" id="modal_ok_btn" style="${okStyle || 'background:#dc2626;color:#fff;font-weight:700'}">${e(okText)}</button>
+      </div>
+    </div>
+  `, mEl => {
+    mEl.querySelector('#modal_cancel_btn').onclick = () => mEl.remove();
+    mEl.querySelector('#modal_ok_btn').onclick = async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await onOk();
+        mEl.remove();
+      } catch (err) {
+        toast(err.message || 'Ошибка', true);
+        ev.target.disabled = false;
+      }
+    };
+  });
+  return m;
+}
+
 const fmtD = d => {
   try {
     return new Date(d + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -4052,16 +4083,35 @@ async function pgAdmin(app) {
 
     ab.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { AF.comp = b.dataset.c; AF.round = ''; re(); });
     $('#rsel').onchange = ev => { AF.round = ev.target.value; re(); };
-    $('#gen').onclick = async () => {
-      const force = all.length && confirm('Расписание этого сезона уже есть. Создать заново? Сыгранные матчи пропадут.');
-      if (all.length && !force) return;
-      const r = await act(() => api('/admin/season', { start: $('#sd').value, name: $('#sn').value, force: 1 }), r => `Создано матчей: ${r.fixtures}`);
-      if (r) re();
+    $('#gen').onclick = () => {
+      const doGen = async () => {
+        const r = await act(() => api('/admin/season', { start: $('#sd').value, name: $('#sn').value, force: 1 }), r => `Создано матчей: ${r.fixtures}`);
+        if (r) re();
+      };
+      if (all.length) {
+        confirmModal({
+          title: 'Пересоздание расписания',
+          msg: `Расписание этого сезона уже есть (${all.length} матчей). Создать его заново? Сыгранные матчи будут перезаписаны.`,
+          okText: 'Создать расписание',
+          okStyle: 'background:#0d7b51;color:#fff;font-weight:700',
+          onOk: doGen
+        });
+      } else {
+        doGen();
+      }
     };
-    $('#btn_delete_schedule') && ($('#btn_delete_schedule').onclick = async () => {
-      if (!confirm(`Вы действительно хотите полностью удалить расписание сезона ${curSeason}? Все матчи этого сезона будут удалены.`)) return;
-      const r = await act(() => api('/admin/schedule/delete', { season: curSeason }), 'Расписание сезона успешно удалено');
-      if (r) re();
+    $('#btn_delete_schedule') && ($('#btn_delete_schedule').onclick = () => {
+      confirmModal({
+        title: 'Удаление расписания',
+        msg: `Вы действительно хотите полностью удалить всё расписание сезона ${curSeason}? Все сыгранные и запланированные матчи чемпионатов и кубка будут стёрты.`,
+        okText: '🗑️ Удалить расписание',
+        okStyle: 'background:#dc2626;color:#fff;font-weight:700',
+        onOk: async () => {
+          await api('/admin/schedule/delete', { all: true, season: curSeason });
+          toast('Расписание успешно удалено');
+          re();
+        }
+      });
     });
     if ($('#btn_open_season_modal')) {
       $('#btn_open_season_modal').onclick = async () => {
