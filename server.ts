@@ -883,7 +883,7 @@ function load() {
     }
   }
   const hasRplSchedule = db.fixtures.some((f: any) => f.comp === 'rpl' && f.season === S());
-  if (!hasRplSchedule || !db.cupState2026) {
+  if (!db.settings.scheduleCleared && (!hasRplSchedule || !db.cupState2026)) {
     genSeason('2026-07-18', S());
   } else if (db.cupState2026 && db.fixtures.length) {
     recalculateCupGroups(db.cupState2026, db.fixtures);
@@ -4719,6 +4719,7 @@ app.post('/api/season/switch', (req: any, res) => {
   if (!target) return fail(res, 'Укажите сезон');
   
   db.settings.season = target;
+  db.settings.scheduleCleared = false;
   const hasRpl = db.fixtures.some((f: any) => f.season === target && f.comp === 'rpl');
   if (!hasRpl) {
     const startYear = parseInt(target.slice(0, 4), 10) || 2026;
@@ -4740,18 +4741,28 @@ app.post('/api/admin/schedule/real-times', admin, (req, res) => {
 });
 
 app.post('/api/admin/schedule/delete', admin, (req, res) => {
+  const allSeasons = req.body?.all || !req.body?.season;
   const targetSeason = req.body?.season || S();
   const comp = req.body?.comp;
   const beforeCount = (db.fixtures || []).length;
   if (comp) {
     db.fixtures = (db.fixtures || []).filter((f: any) => !(f.season === targetSeason && f.comp === comp));
+  } else if (allSeasons) {
+    db.fixtures = [];
   } else {
     db.fixtures = (db.fixtures || []).filter((f: any) => f.season !== targetSeason);
   }
+  db.settings.scheduleCleared = true;
   const deletedCount = beforeCount - (db.fixtures || []).length;
   mcache.clear();
+  try {
+    const files = fs.readdirSync(MDIR);
+    for (const file of files) {
+      if (file.endsWith('.json')) fs.unlinkSync(path.join(MDIR, file));
+    }
+  } catch {}
   invalidateAgg();
-  save();
+  saveNow();
   res.json({ ok: 1, season: targetSeason, deletedCount, remainingFixtures: db.fixtures.length });
 });
 
